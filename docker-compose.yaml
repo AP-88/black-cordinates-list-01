@@ -1,0 +1,44 @@
+services:
+
+  service-a-container:
+    build:
+      context: ./serviceA/
+      dockerfile: Dockerfile
+    container_name: svc-a-cont
+    volumes:
+      # Mounts a local "data" directory
+      - ./data:/app/data
+    networks:
+      - my-network
+    ports:
+      - "8081:8080"
+
+  service-b-container:
+    build:
+      context: ./serviceB/
+      dockerfile: Dockerfile
+    container_name: svc-b-cont
+    volumes:
+      # Mounts a local "data" directory
+      - ./data:/app/data
+    networks:
+      - my-network
+    ports:
+      - "8082:8080"
+    
+  service-c-container:
+    build:
+      context: ./serviceC/
+      dockerfile: Dockerfile
+    container_name: svc-c-cont
+    volumes:
+      # Mounts a local "data" directory
+      - ./data:/app/data
+    networks:
+      - my-network
+    ports:
+      - "8083:8080"
+
+networks:
+  my-network:
+    driver: bridge
