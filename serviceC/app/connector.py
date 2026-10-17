@@ -33,10 +33,10 @@ async def MakeRequest(url, tout, svsName):
         # Match the status code and pass the real error detail
         raise HTTPException(status_code=response.status_code, detail=f"{svsName} failed: {error_detail}")
         
-    return response.json()
+    return response
 
 def FreeIpApiKeyPicker(js):
-    # FIX: If js is None, or 'ipAddress' is missing, or 'ipAddress' is null/None
+    # If js is None, or 'ipAddress' is missing, or 'ipAddress' is null/None
     if not js or "ipAddress" not in js or js["ipAddress"] is None:
         return {}
     
@@ -55,3 +55,21 @@ def FreeIpApiKeyPicker(js):
         if k in OurKeys: 
             ResultDict[k] = v
     return ResultDict
+
+# mapping picker method for the ip-api fields
+def IpApiKeyPicker(js):
+    # If the provider returns a fail status
+    if not js or js.get("status") == "fail":
+        return {}
+        
+    # Maps fields to match your main architecture layout seamlessly
+    return {
+        "ipAddress": js.get("query"),
+        "latitude": js.get("lat"),
+        "longitude": js.get("lon"),
+        "countryName": js.get("country"),
+        "cityName": js.get("city"),
+        "asn": js.get("as", "").split(" ")[0] if js.get("as") else None,
+        "asnOrganization": " ".join(js.get("as", "").split(" ")[1:]) if js.get("as") else None,
+        "isProxy": False # ip-api doesn't expose a proxy flag
+    }

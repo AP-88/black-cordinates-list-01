@@ -3,6 +3,8 @@ import asyncio
 import os
 import json
 import aiofiles
+import math
+import statistics  # Leverage standard library for precise median math
 
 class IpMemory:
     FILE_PATH = "/app/data/storage.json"
@@ -10,26 +12,25 @@ class IpMemory:
     
     @classmethod
     def initialize_storage(cls):
-        """
-        Synchronous initializer to run on app startup.
-        Ensures directories and baseline files exist with proper structures.
-        """
+       
+        # Synchronous initializer to run on app startup 
+        # to ensures directories and baseline files exist with proper structures.
         dir_name = os.path.dirname(cls.FILE_PATH)
         
         # Create directories recursively if they don't exist
         if not os.path.exists(dir_name):
             os.makedirs(dir_name, exist_ok=True)
-            print(f"Created shared volume directory path: {dir_name}")
+            print(f"(srcB) Created shared volume directory path: {dir_name}")
 
         # Initialize the storage schema file if missing or empty
         if not os.path.exists(cls.FILE_PATH) or os.path.getsize(cls.FILE_PATH) == 0:
             with open(cls.FILE_PATH, 'w') as f:
                 json.dump({"data": {}, "UsedIps": []}, f)
-            print(f"Initialized clean storage file template at: {cls.FILE_PATH}")
+            print(f"(srcB) Initialized clean storage file template at: {cls.FILE_PATH}")
 
     @classmethod
     async def _load_file(cls) -> dict:
-        """Helper to read the JSON file from disk."""
+        # Helper to read the JSON file from disk
         try:
             async with aiofiles.open(cls.FILE_PATH, mode='r') as f:
                 content = await f.read()
@@ -41,7 +42,7 @@ class IpMemory:
 
     @classmethod
     async def _save_file(cls, storage_dict: dict):
-        """Helper to write the dictionary state back to disk."""
+        # Helper to write the dictionary state back to disk
         async with aiofiles.open(cls.FILE_PATH, mode='w') as f:
             await f.write(json.dumps(storage_dict))
     
@@ -75,7 +76,7 @@ class IpMemory:
 
     @classmethod
     async def doesIpExist(cls, ip):
-        """checks if ip exists in memory and returns boolean"""
+        # checks if ip exists in memory and returns boolean
         async def _ip_exists():
             state = await cls._load_file()
             return ip in state["UsedIps"]
@@ -86,7 +87,6 @@ class IpMemory:
         async def _add():
             state = await cls._load_file()
             newId = str(uuid4())[:8]
-            
             state["data"][newId] = requestData
             
             if requestData["ipAddress"] not in state["UsedIps"]:
@@ -114,17 +114,17 @@ class IpMemory:
     
     @classmethod
     async def generate_geo_clusters(cls, threshold=5.0):
-        """Ultra-short geographic clustering using Euclidean grouping."""
-        import math
+        # Ultra-short geographic clustering using Euclidean grouping
         state = await cls._load_file()
         stored_data = state.get("data", {})
         clusters = {}
 
         for rec_id, rec in stored_data.items():
-            lon, lat = rec.get("longitude"), rec.get("latitude")
-            if lon is None or lat is None: continue
+            lat, lon = rec.get("latitude"), rec.get("longitude")
+            if lat is None or lon is None: 
+                continue
             
-            coord = [float(lon), float(lat)]
+            coord = [float(lat), float(lon)]
             matched_cluster = None
 
             # Look for an existing cluster that is mathematically close
@@ -138,14 +138,18 @@ class IpMemory:
                 clusters[matched_cluster]["records"][rec_id] = rec
                 # Short array re-calculation for means and medians
                 all_pts = clusters[matched_cluster]["all_coords"]
+                
+                # Dynamic mean updates
                 clusters[matched_cluster]["mean_coordinates"] = [round(sum(x)/len(all_pts), 5) for x in zip(*all_pts)]
-                clusters[matched_cluster]["median_coordinates"] = [round(sorted(x)[len(x)//2], 5) for x in zip(*all_pts)]
+                clusters[matched_cluster]["median_coordinates"] = [round(statistics.median(x), 5) for x in zip(*all_pts)]
             else:
                 # Create a fresh cluster instantly
                 c_name = f"cluster_{len(clusters) + 1}"
                 clusters[c_name] = {
-                    "mean_coordinates": coord, "median_coordinates": coord,
-                    "records": {rec_id: rec}, "all_coords": [coord]
+                    "mean_coordinates": coord,
+                    "median_coordinates": coord,
+                    "records": {rec_id: rec},
+                    "all_coords": [coord]
                 }
 
         # Flatten records to match the requested output structure exactly
