@@ -3,6 +3,7 @@ import connector as connector
 import asyncio
 from pydantic import RootModel
 from typing import List
+import time
 #import uvicorn
 
 app = FastAPI()
@@ -11,6 +12,10 @@ app = FastAPI()
 SvcA_url = "http://svc-a-cont:8080"
 SvcB_url = "http://svc-b-cont:8080"
 SvcC_url = "http://svc-c-cont:8080"
+
+# window timestamp tracker to protect FreeIpAPI (Max 60 requests / 60 seconds)
+FREEIPAPI_LOOKUP_TIMESTAMPS = []
+FREEIPAPI_MAX_LIMIT = 59  # Set  below 60 for a safe padding
 
 @app.get("/favicon.ico")
 def favicon():
@@ -24,21 +29,54 @@ async def GetData():
 
 @app.get("/resolve-ip/{ip}")
 async def AddIp(ip: str):
-    print(f"svcA: Routing IP {ip} through SvcC")
+    global FREEIPAPI_LOOKUP_TIMESTAMPS
+    print(f"(svcA): Initializing check loop for IP {ip}")
     ip = connector.ValidateIp(ip)
+    
+    # Check if the IP address is already tracked in local storage.json
+    check_res = await connector.MakeRequest(
+        f"{SvcB_url}/check-ip/{ip}", 3, f"ServiceB-Check-{ip}"
+    )
+    # If it exists in local storage.json, return it
+    if check_res.get("exists"):
+        print(f"(svcA): IP {ip} already exists in storage. not sending a provider request.")
+        raise HTTPException(status_code=400, detail="IP entry already exists in local storage.")
+    
+    # RATE LIMIT COUNTER
+    current_time = time.time()
+    one_minute_ago = current_time - 60.0
+    
+    # Clean old timestamps from the tracking list that are older than 1 minute
+    FREEIPAPI_LOOKUP_TIMESTAMPS = [t for t in FREEIPAPI_LOOKUP_TIMESTAMPS if t > one_minute_ago]
 
-    # Get the geo-data from the svcC
+    # Evaluate if 1-minute window is currently full
+    if len(FREEIPAPI_LOOKUP_TIMESTAMPS) >= FREEIPAPI_MAX_LIMIT:
+        # Calculate how long the client needs to wait until a slot opens up
+        oldest_request_age = FREEIPAPI_LOOKUP_TIMESTAMPS[0]
+        wait_seconds = round(60.0 - (current_time - oldest_request_age), 1)
+        
+        print(f"(svcA) [Gatekeeper Block]: FreeIpAPI limit cushion hit ({len(FREEIPAPI_LOOKUP_TIMESTAMPS)} lookups in last 60s).")
+        raise HTTPException(
+            status_code=429, 
+            detail=f"(svcA) Too Many Requests: Single lookup threshold reached, please wait {wait_seconds} seconds."
+        )
+
+    # Log the timestamp of this upcoming live external request
+    FREEIPAPI_LOOKUP_TIMESTAMPS.append(current_time)
+    
+    print(f"(svcA): Unique IP confirmed, window count: {len(FREEIPAPI_LOOKUP_TIMESTAMPS)}/60s. asking for geo-data via SvcC")
     geo_data = await connector.MakeRequest(
         f"{SvcC_url}/lookup/{ip}", 5, "ServiceC-Lookup"
     )
-    # Add verified geo-data down to svcB to store it
+    
+    # add geo-data to svcB to store it
     return await connector.MakeRequest(
         f"{SvcB_url}/AddIp", 8, "ServiceB-AddIp", meth='POST', JsonData=geo_data
     )
     
 @app.get("/delete/{iid}")
 async def delete(iid):
-    print(f"START: delete {iid}")
+    print(f"(svcA) START: delete {iid}")
     return await connector.MakeRequest(
         SvcB_url + f"/delete/{iid}", 2, "ServiceB-Delete", meth='DELETE'
     )
@@ -52,7 +90,7 @@ async def resolve_ip_list(payload: IpListRequest):
     raw_list = payload.root
     # Clean whitespace and drop identical duplicates from the input list
     cleaned_unique_input = list(dict.fromkeys([ip.strip() for ip in raw_list if ip.strip()]))
-    print(f"SvcA: Starting throttled batch pipeline for {len(cleaned_unique_input)} unique inputs.")
+    print(f"(svcA): Starting throttled batch pipeline for {len(cleaned_unique_input)} unique inputs.")
     
     final_results = []
     lookup_counter = 0  # Tracks live API lookups to determine if we need to sleep due to FreeIpAPI limitation
@@ -71,11 +109,11 @@ async def resolve_ip_list(payload: IpListRequest):
                 continue  # proceed to the next IP with no delay
             # LIMIT THROTTLING: If this isn't the first live lookup, pause briefly
             if lookup_counter > 0:
-                print("svcA: Throttling control active. Sleeping for 1.1 seconds due to freeIpAPI limits...")
+                print("(svcA): Throttling control active. Sleeping for 1.1 seconds due to freeIpAPI limits...")
                 await asyncio.sleep(1.1)  # wait 1.1 sec to stay under 60 requests/min
             # Execute the external lookup in FreeIpAPI via svcC
             lookup_counter += 1
-            print(f"ServiceA: Executing external lookup #{lookup_counter} for IP: {ip}")
+            print(f"(svcA) Executing external lookup #{lookup_counter} for IP: {ip}")
             geo_data = await connector.MakeRequest(
                 f"{SvcC_url}/lookup/{ip}", 5, f"ServiceC-Lookup-{ip}"
             )

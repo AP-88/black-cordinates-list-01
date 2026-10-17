@@ -7,12 +7,12 @@ class ValidIpDTO(BaseModel):
 
 def ValidateIp(ip: str):
     # Instantiate the Pydantic model to perform validation
-    try: validated = ValidIpDTO(ip=ip)
+    try: 
+        validated = ValidIpDTO(ip=ip)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
+        raise HTTPException(status_code=400, detail=f"Invalid IP address format: {str(e)}")
     print("(src-c) validation passed: ", validated.ip)
-    return validated.ip
+    return str(validated.ip)
 
 
 async def MakeRequest(url, tout, svsName):
@@ -20,7 +20,7 @@ async def MakeRequest(url, tout, svsName):
         try: 
             response = await client.get(url, timeout=tout)
         except httpx.TimeoutException:
-            raise HTTPException(status_code=504, detail=f"{svsName} timed out")
+            raise HTTPException(status_code=503, detail=f"{svsName} timed out")
 
     # If the request fails, check if the response contains a detailed JSON error message
     if response.status_code != 200:
@@ -61,7 +61,14 @@ def IpApiKeyPicker(js):
     # If the provider returns a fail status
     if not js or js.get("status") == "fail":
         return {}
-        
+    
+    # Standardize AS string (like: "AS15169 Google LLC") 
+    as_raw = js.get("as", "")
+    as_parts = as_raw.split(" ", 1) if as_raw else ["", ""]
+    
+    asn = as_parts[0] if as_parts[0] else None
+    asn_org = as_parts[1] if len(as_parts) > 1 else None
+       
     # Maps fields to match your main architecture layout seamlessly
     return {
         "ipAddress": js.get("query"),
@@ -69,7 +76,7 @@ def IpApiKeyPicker(js):
         "longitude": js.get("lon"),
         "countryName": js.get("country"),
         "cityName": js.get("city"),
-        "asn": js.get("as", "").split(" ")[0] if js.get("as") else None,
-        "asnOrganization": " ".join(js.get("as", "").split(" ")[1:]) if js.get("as") else None,
+        "asn": asn,
+        "asnOrganization": asn_org,
         "isProxy": False # ip-api doesn't expose a proxy flag
     }

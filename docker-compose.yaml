@@ -7,7 +7,7 @@ services:
     container_name: svc-a-cont
     volumes:
       # Mounts a local "data" directory
-      - ./data:/app/data
+      - ./data:/app/data:ro
     networks:
       - my-network
     ports:
@@ -33,7 +33,7 @@ services:
     container_name: svc-c-cont
     volumes:
       # Mounts a local "data" directory
-      - ./data:/app/data
+      - ./data:/app/data:ro
     networks:
       - my-network
     ports:

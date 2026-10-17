@@ -6,7 +6,7 @@ from memory import IpMemory
 async def lifespan(app: FastAPI):
     # 1. This runs BEFORE the server starts accepting any web traffic
     IpMemory.initialize_storage()
-    print(f"Service B: Storage path validation completed successfully.")
+    print(f"(svcB): Storage path validation completed successfully.")
     yield
     # 2. Any shutdown/cleanup operations would go here
 
@@ -26,13 +26,13 @@ async def check_ip_existence(ip: str):
 
 @app.get("/getAll")
 async def get_all():
-    print(f"svcB: Fetching all storage metrics")
+    print(f"(svcB): Fetching all storage metrics")
     return await IpMemory.getData()
 
 @app.post("/AddIp")
 async def add_ip(payload: dict):
     ip_addr = payload.get("ipAddress")
-    print(f"svcB: Attempting to save record for IP: {ip_addr}")
+    print(f"(svcB): Attempting to save record for IP: {ip_addr}")
     
     ip_exists = await IpMemory.doesIpExist(ip_addr)
     if ip_exists:
@@ -44,7 +44,7 @@ async def add_ip(payload: dict):
 
 @app.delete("/delete/{iid}")
 async def delete_ip_record(iid: str):
-    print(f"svcB: Processing deletion request for Key: {iid}")
+    print(f"(svcB): Processing deletion request for Key: {iid}")
     
     # Verify key identity exists before execution
     key_exists = await IpMemory.doesKeyExist(iid)
