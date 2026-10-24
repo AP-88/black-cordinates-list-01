@@ -1,1 +1,1 @@
-{"users": {}}
+{"users": {"custom-ip@example.com": {"id": "66b2255c", "ip_address": "8.8.8.8", "timestamp": 1792877109.2669773}, "auto-ip@example.com": {"id": "4338c4b9", "ip_address": "172.19.0.1", "timestamp": 1792877278.0654643}}}

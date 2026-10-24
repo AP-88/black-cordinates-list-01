@@ -215,7 +215,11 @@ async def user_signin(payload: UserSignInDTO, request: Request):
 
     if duplicate_ip_detected:
         print(f"(svcA) [SignIn Filter]: Duplicate IP '{client_ip}' seen within 60s window. Event dropped.")
-        return {"message": "your request was received"}
+        # Returns a clean, explicit sign-in flag to identify duplicate interception events
+        return {
+            "message": "your request was received",
+            "signin": "duplicate"
+        }
 
     # Save the current execution timestamp and the string signature
     RECENT_SIGNIN_IPS.append((current_time, client_ip))
