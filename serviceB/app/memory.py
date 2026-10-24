@@ -5,6 +5,7 @@ import json
 import aiofiles
 import math
 import statistics  # Leverage standard library for precise median math
+import time  # Added for user registration timestamps
 
 class IpMemory:
     FILE_PATH = "/app/data/storage.json"
@@ -160,3 +161,69 @@ class IpMemory:
                 **c_data["records"] # Unpacks all ip_record_id: data records directly into the top level
             } for c_id, c_data in clusters.items()
         }
+
+# USER ACCOUNT DATABASE STATE MANAGER (users.json)
+class UserMemory:
+    FILE_PATH = "/app/data/users.json"
+    userLock = asyncio.Lock()
+
+    @classmethod
+    def initialize_storage(cls):
+        #Ensures directories exist and builds out the base users schema.
+        dir_name = os.path.dirname(cls.FILE_PATH)
+        if not os.path.exists(dir_name):
+            os.makedirs(dir_name, exist_ok=True)
+
+        if not os.path.exists(cls.FILE_PATH) or os.path.getsize(cls.FILE_PATH) == 0:
+            with open(cls.FILE_PATH, 'w') as f:
+                json.dump({"users": {}}, f)
+            print(f"(srcB) Initialized clean user storage database at: {cls.FILE_PATH}")
+
+    @classmethod
+    async def _load_file(cls) -> dict:
+        try:
+            async with aiofiles.open(cls.FILE_PATH, mode='r') as f:
+                content = await f.read()
+                if not content.strip():
+                    return {"users": {}}
+                return json.loads(content)
+        except (json.JSONDecodeError, IOError):
+            return {"users": {}}
+
+    @classmethod
+    async def _save_file(cls, storage_dict: dict):
+        async with aiofiles.open(cls.FILE_PATH, mode='w') as f:
+            await f.write(json.dumps(storage_dict))
+
+    @classmethod
+    async def acquireLock(cls, func, *args):
+        async with cls.userLock:
+            return await func(*args)
+
+    @classmethod
+    async def doesUserExist(cls, email: str) -> bool:
+        # Checks if an email exists in users.json (case-insensitive).
+        async def _check():
+            state = await cls._load_file()
+            return email.strip().lower() in state["users"]
+        return await cls.acquireLock(_check)
+
+    @classmethod
+    async def registerNewUser(cls, user_data: dict) -> str:
+        # Saves a brand new user profile record to disk.
+        async def _add():
+            state = await cls._load_file()
+            email_key = user_data.get("email", "").strip().lower()
+            
+            if not email_key:
+                return "failed_empty_key"
+                
+            new_id = str(uuid4())[:8]
+            state["users"][email_key] = {
+                "id": new_id,
+                "ip_address": user_data.get("ip_address"),
+                "timestamp": time.time()
+            }
+            await cls._save_file(state)
+            return new_id
+        return await cls.acquireLock(_add)

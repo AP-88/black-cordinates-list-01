@@ -1,7 +1,6 @@
 fastapi
 uvicorn
 httpx
-pydantic
+pydantic[email]
 aiofiles
-asyncio
-typing
+aiokafka>=0.12.0

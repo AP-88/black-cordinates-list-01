@@ -1,9 +1,11 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 import connector as connector
 import asyncio
-from pydantic import RootModel
-from typing import List
+from pydantic import BaseModel, RootModel, EmailStr, IPvAnyAddress, Field
+from typing import List, Optional
+from aiokafka import AIOKafkaProducer
 import time
+import json
 #import uvicorn
 
 app = FastAPI()
@@ -16,6 +18,21 @@ SvcC_url = "http://svc-c-cont:8080"
 # window timestamp tracker to protect FreeIpAPI (Max 60 requests / 60 seconds)
 FREEIPAPI_LOOKUP_TIMESTAMPS = []
 FREEIPAPI_MAX_LIMIT = 59  # Set  below 60 for a safe padding
+
+# Kafka Integration
+KAFKA_BROKER_URL = "kafka-broker:9092"
+KAFKA_TOPIC = "user-gateway"
+
+# list to track client sign-in IP timestamps over 60 seconds
+RECENT_SIGNIN_IPS = []
+
+class UserSignInDTO(BaseModel):
+    email: EmailStr
+    password: Optional[str] = Field(default=None)
+    ip_address: Optional[IPvAnyAddress] = Field(default=None, alias="ip-address")
+
+    class Config:
+        populate_by_name = True  # Allows FastAPI to parse inputs whether using camelCase, snake_case, or aliases
 
 @app.get("/favicon.ico")
 def favicon():
@@ -155,6 +172,77 @@ async def resolve_ip_list(payload: IpListRequest):
 @app.get("/clusters")
 async def get_clusters(threshold: float = 5.0):
     return await connector.MakeRequest(f"{SvcB_url}/generate-geo-clusters?threshold={threshold}", 5, "ServiceB-Clusters")
+
+# SIGN-IN ENDPOINT WITH AUTOMATIC IP FALLBACK
+@app.post("/signin")
+async def user_signin(payload: UserSignInDTO, request: Request):
+    # Handles user sign-in. prioritizes a user-provided IP argument, 
+    # falling back to the client auto-detection IP if missing.
+    global RECENT_SIGNIN_IPS
+    print(f"(svcA) START: Processing sign-in validation payload for email: {payload.email}")
+
+    # check if a valid IP was supplied by the user
+    if payload.ip_address is not None:
+        client_ip = str(payload.ip_address)
+        print(f"(svcA): Using provided payload IP address: {client_ip}")
+    else:
+        # Fallback to reading client IP automatically
+        # Check standard reverse proxy headers first (Nginx, Traefik, Docker gateway)
+        client_ip = request.headers.get("X-Forwarded-For")
+        if client_ip:
+            # Grab the first entry in case a chain of proxies exists
+            client_ip = client_ip.split(",")[0].strip()
+        else:
+            # Native direct fallback client lookup reference
+            client_ip = request.client.host if request.client else "127.0.0.1"
+            
+        print(f"(svcA): IP omitted by user. Automatically grabbed network client IP: {client_ip}")
+
+    # Run a quick IP validation to make sure auto-grabbed IPs are valid strings
+    try:
+        client_ip = str(connector.ValidateIp(client_ip))
+    except Exception:
+        raise HTTPException(status_code=400, detail="(svcA): Unable to recognise a valid IP address.")
+
+    current_time = time.time()
+    one_minute_ago = current_time - 60.0
+
+    # Unpack the new tuple (timestamp, ip) to filter out logs older than 60 seconds
+    RECENT_SIGNIN_IPS = [item for item in RECENT_SIGNIN_IPS if item[0] > one_minute_ago]
+
+    # Evaluate if this IP string exists inside the tuple records
+    duplicate_ip_detected = any(item[1] == client_ip for item in RECENT_SIGNIN_IPS)
+
+    if duplicate_ip_detected:
+        print(f"(svcA) [SignIn Filter]: Duplicate IP '{client_ip}' seen within 60s window. Event dropped.")
+        return {"message": "your request was received"}
+
+    # Save the current execution timestamp and the string signature
+    RECENT_SIGNIN_IPS.append((current_time, client_ip))
+    
+    # Broadcast event down to Apache Kafka
+    event_payload = {
+        "event_type": "USER_SIGNIN",
+        "timestamp": current_time,
+        "email": payload.email,
+        "ip_address": client_ip,
+        "has_password": payload.password is not None
+    }
+
+    try:
+        print(f"(svcA) [Kafka Production]: Sending event down to topic '{KAFKA_TOPIC}'...")
+        producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BROKER_URL)
+        await producer.start()
+        try:
+            serialized_msg = json.dumps(event_payload).encode('utf-8')
+            await producer.send_and_wait(KAFKA_TOPIC, serialized_msg)
+            print("(svcA) [Kafka Production]: Event broadcasted successfully.")
+        finally:
+            await producer.stop()
+    except Exception as e:
+        print(f"(svcA): [Kafka Connection Warning]: Event stream offline, message packet dropped: {str(e)}")
+
+    return {"message": "your request was received"}
 
 #if __name__ == "__main__":
     #uvicorn.run("server:app", host="0.0.0.0", port=8081, workers=1)

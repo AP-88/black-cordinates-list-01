@@ -1,14 +1,14 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
-from memory import IpMemory
+from fastapi import FastAPI, HTTPException, Body
+from memory import IpMemory, UserMemory
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. This runs BEFORE the server starts accepting any web traffic
+   # Initializes both JSON files inside the shared Docker Named Volume folder path
     IpMemory.initialize_storage()
-    print(f"(svcB): Storage path validation completed successfully.")
+    UserMemory.initialize_storage()
+    print(f"(svcB): Multi-file storage validation completed successfully.")
     yield
-    # 2. Any shutdown/cleanup operations would go here
 
 # Init FastAPI with the lifespan event handler
 app = FastAPI(lifespan=lifespan)
@@ -57,6 +57,27 @@ async def delete_ip_record(iid: str):
 @app.get("/generate-geo-clusters")
 async def generate_clusters(threshold: float = 5.0):
     return await IpMemory.generate_geo_clusters(threshold=threshold)
+
+######################################
+# USER UTILITIES FOR KAFKA CONSUMER
+######################################
+@app.get("/check-user/{email}")
+async def check_user_existence(email: str):
+    # Allows the Kafka Consumer to check if a user is already signed up
+    exists = await UserMemory.doesUserExist(email)
+    return {"exists": exists}
+
+@app.post("/add-user")
+async def add_user_record(payload: dict = Body(...)):
+    # Allows the Kafka Consumer to save a new verified user account
+    email = payload.get("email")
+    user_exists = await UserMemory.doesUserExist(email)
+    
+    if user_exists:
+        raise HTTPException(status_code=400, detail="User already exists inside storage parameters.")
+        
+    assigned_id = await UserMemory.registerNewUser(payload)
+    return {"status": "success", "id": assigned_id}
 
 #if __name__ == "__main__":
     #uvicorn.run("server:app", host="0.0.0.0", port=8082, workers=1)
