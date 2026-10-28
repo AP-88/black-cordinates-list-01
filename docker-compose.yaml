@@ -97,6 +97,7 @@ services:
       KAFKA_TOPIC: "user-gateway"
       KAFKA_GROUP_ID: "user-gateway-group"
       SERVICE_B_URL: "http://svc-b-cont:8080"
+      PYTHONUNBUFFERED: "1"
     restart: unless-stopped
     networks:
       - my-network
