@@ -1,0 +1,16 @@
+                  ┌───────────────┐
+                  │   Service A   │
+                  └───────┬───────┘
+                          │ (Publish: Sign-In Event)
+                          ▼
+                  ┌───────────────┐
+                  │ Kafka Broker  │ [Topic: user-gateway]
+                  └─┬───┬───┬─────┘
+                    │   │   │   
+     ┌──────────────┘   │   │    
+     |                  |   |────────┐                   
+┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+│  Existing    │ │ Security &   │ │ Welcome Email│
+│  User DB     │ │ Fraud Audit  │ │ Onboarding   │
+│  Consumer    │ │ Consumer     │ │ Consumer     │ 
+└──────────────┘ └──────────────┘ └──────────────┘
